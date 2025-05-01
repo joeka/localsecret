@@ -8,8 +8,8 @@ use axum::{
 use clap::Parser;
 use local_ip_address::local_ip;
 use rand::{Rng, distr::Alphanumeric};
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::{net::IpAddr, path::PathBuf};
 use tokio::{
     self, signal,
     sync::{Mutex, mpsc},
@@ -43,6 +43,12 @@ struct Args {
         help = "How some invalid url can be used before the server stops. Don't set this to 0, as browser e.g. try to fetch the favicon.ico file"
     )]
     failed_attempts: u16,
+
+    #[arg(
+        long,
+        help = "IP address to bind the server to. If not set, will try to find the local IP address"
+    )]
+    bind_ip: Option<IpAddr>,
 }
 
 #[derive(Clone)]
@@ -96,13 +102,7 @@ async fn main() {
     let absolute_path = validate_and_get_absolute_path(&args.secret_file);
     let file_url_path = generate_file_url_path(&args.secret_file, args.url_prefix_length);
 
-    let local_address = match local_ip() {
-        Ok(ip) => ip,
-        Err(error) => {
-            eprintln!("Can't determine local ip: {:#?}", error);
-            std::process::exit(1);
-        }
-    };
+    let local_address = get_local_ip(args.bind_ip);
 
     let (shutdown_sender, shutdown_receiver) = mpsc::channel(16);
 
@@ -130,6 +130,19 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal(shutdown_receiver))
         .await
         .unwrap();
+}
+
+fn get_local_ip(bind_ip: Option<IpAddr>) -> IpAddr {
+    match bind_ip {
+        Some(ip) => ip,
+        None => match local_ip() {
+            Ok(ip) => ip,
+            Err(error) => {
+                eprintln!("Can't determine local ip: {:#?}", error);
+                std::process::exit(1);
+            }
+        },
+    }
 }
 
 fn validate_and_get_absolute_path(file_path: &PathBuf) -> PathBuf {
