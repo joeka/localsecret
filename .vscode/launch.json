@@ -1,0 +1,48 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'localsecret'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=localsecret",
+                    "--package=localsecret"
+                ],
+                "filter": {
+                    "name": "localsecret",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "-s",
+                "Cargo.toml"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'localsecret'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=localsecret",
+                    "--package=localsecret"
+                ],
+                "filter": {
+                    "name": "localsecret",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
