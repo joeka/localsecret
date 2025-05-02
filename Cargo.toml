@@ -1,7 +1,14 @@
 [package]
 name = "localsecret"
+description = "A cli tool to share a secret file locally via http"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/joeka/localsecret"
+categories = ["command-line-utilities"]
+keywords = ["cli", "secret", "http", "local", "server"]
+exclude = ["/.github"]
 
 [dependencies]
 axum = "0.8.4"

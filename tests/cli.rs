@@ -50,7 +50,7 @@ fn secret_file_can_be_retrieved_once() -> Result<(), Box<dyn std::error::Error>>
     let url_predicate =
         predicate::str::is_match(r"^http://\d+\.\d+\.\d+\.\d+:\d+/[a-zA-Z0-9]{42}/test_file\.txt$")
             .unwrap();
-    assert!(url_predicate.eval(&url));
+    assert!(url_predicate.eval(url));
 
     // Get the content from the URL
     let response = reqwest::blocking::get(url)?;
@@ -72,7 +72,7 @@ fn secret_file_can_be_retrieved_once() -> Result<(), Box<dyn std::error::Error>>
         Some(exit_code) => assert_eq!(exit_code.code(), Some(0)),
         None => {
             child.kill()?;
-            assert!(false, "Process didn't terminate in time");
+            panic!("Process didn't terminate in time");
         }
     }
     Ok(())
