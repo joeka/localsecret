@@ -65,6 +65,49 @@ struct FailState {
     shutdown_channel: mpsc::Sender<()>,
 }
 
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let args = Args::parse();
+
+    let absolute_path = validate_and_get_absolute_path(&args.secret_file);
+    let file_url_path = generate_file_url_path(&args.secret_file, args.url_prefix_length);
+
+    let local_address = get_local_ip(args.bind_ip);
+
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel(16);
+
+    let access_state = AccessState {
+        uses: Arc::new(Mutex::new(0)),
+        maximum_uses: args.uses,
+        shutdown_channel: shutdown_sender.clone(),
+    };
+    let fail_state = FailState {
+        failed_attempts: Arc::new(Mutex::new(0)),
+        maximum_failed_attempts: args.failed_attempts,
+        shutdown_channel: shutdown_sender,
+    };
+
+    let router = {
+        let file_url = file_url_path.clone();
+        Router::new()
+            .route_service(&file_url, ServeFile::new(absolute_path))
+            .layer(middleware::from_fn_with_state(access_state, limit_uses))
+            .fallback(handler_404)
+            .with_state(fail_state)
+    };
+    let listener = create_listener(local_address).await;
+
+    println!(
+        "http://{}{}",
+        listener.local_addr().unwrap(),
+        &file_url_path
+    );
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal(shutdown_receiver))
+        .await
+        .unwrap();
+}
+
 async fn limit_uses(State(state): State<AccessState>, request: Request, next: Next) -> Response {
     let mut lock = state.uses.lock().await;
     if *lock >= state.maximum_uses {
@@ -95,41 +138,14 @@ async fn handler_404(State(state): State<FailState>) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "404 Not Found")
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let args = Args::parse();
-
-    let absolute_path = validate_and_get_absolute_path(&args.secret_file);
-    let file_url_path = generate_file_url_path(&args.secret_file, args.url_prefix_length);
-
-    let local_address = get_local_ip(args.bind_ip);
-
-    let (shutdown_sender, shutdown_receiver) = mpsc::channel(16);
-
-    let access_state = create_access_state(args.uses, shutdown_sender.clone());
-    let fail_state = create_fail_state(args.failed_attempts, shutdown_sender);
-
-    let router = {
-        let file_url = file_url_path.clone();
-        Router::new()
-            .route_service(&file_url, ServeFile::new(absolute_path))
-            .layer(middleware::from_fn_with_state(access_state, limit_uses))
-            .fallback(handler_404)
-            .with_state(fail_state)
-    };
-    let listener = tokio::net::TcpListener::bind(format!("{}:0", local_address))
-        .await
-        .unwrap();
-
-    println!(
-        "http://{}{}",
-        listener.local_addr().unwrap(),
-        &file_url_path
-    );
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal(shutdown_receiver))
-        .await
-        .unwrap();
+async fn create_listener(local_address: IpAddr) -> tokio::net::TcpListener {
+    match tokio::net::TcpListener::bind(format!("{}:0", local_address)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Can't bind to local address: {:#?}", error);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn get_local_ip(bind_ip: Option<IpAddr>) -> IpAddr {
@@ -185,25 +201,6 @@ fn generate_file_url_path(file_path: &PathBuf, url_prefix_length: u16) -> String
         .map(char::from)
         .collect();
     format!("/{}/{}", random_prefix, file_name)
-}
-
-fn create_access_state(maximum_uses: u16, shutdown_channel: mpsc::Sender<()>) -> AccessState {
-    AccessState {
-        uses: Arc::new(Mutex::new(0)),
-        maximum_uses,
-        shutdown_channel,
-    }
-}
-
-fn create_fail_state(
-    maximum_failed_attempts: u16,
-    shutdown_channel: mpsc::Sender<()>,
-) -> FailState {
-    FailState {
-        failed_attempts: Arc::new(Mutex::new(0)),
-        maximum_failed_attempts,
-        shutdown_channel,
-    }
 }
 
 async fn shutdown_signal(mut shutdown_receiver: mpsc::Receiver<()>) {
