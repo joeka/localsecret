@@ -227,3 +227,6 @@ async fn shutdown_signal(mut shutdown_receiver: mpsc::Receiver<()>) {
         _ = shutdown_receiver.recv() => {},
     }
 }
+
+#[cfg(test)]
+mod tests;
