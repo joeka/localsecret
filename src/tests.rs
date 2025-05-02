@@ -31,7 +31,7 @@ fn test_validate_and_get_absolute_path_valid_file() {
 fn test_generate_file_url_path() {
     let file_path = PathBuf::from("test_file.txt");
     let url_prefix_length = 8;
-    let url_path = generate_file_url_path(&file_path, url_prefix_length);
+    let url_path = generate_file_url_path(&Some(file_path), url_prefix_length);
 
     assert!(url_path.starts_with('/'));
     assert!(url_path.ends_with("/test_file.txt"));

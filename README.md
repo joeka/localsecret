@@ -5,15 +5,22 @@ Running the command `localsecret -s path/to/my/file.ext` will start a server bin
 An URL is printed to share the file in the local network.
 The URL looks like this: `http://<IP>:<PORT>/<PREFIX>/<filename>`. Where the PREFIX is a randomly generated string. In our example it could look something like this: `http://10.11.12.13:46497/gegPK3qQTFhdSPooJ1bmeU0KGzKSzBkruqI30GXWyi/file.ext`.
 
+Alternatively you can pipe the content into the program, e.g. like this:
+``` bash 
+localsecret < secret.txt
+# or
+echo "very secret" | localsecret
+```
+
 ## Usage
-``` bash
+```
 Share secrets via a local http server
 
-Usage: localsecret [OPTIONS] --secret-file <SECRET_FILE>
+Usage: localsecret [OPTIONS]
 
 Options:
   -s, --secret-file <SECRET_FILE>
-          The secret file to share
+          The secret file to share. If not set, expects the input to be piped to stdin
       --url-prefix-length <URL_PREFIX_LENGTH>
           Length of the randomly generated url prefix [default: 42]
       --uses <USES>

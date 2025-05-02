@@ -4,11 +4,16 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
+    routing::get,
 };
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use local_ip_address::local_ip;
 use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
+use std::{
+    io::{self, IsTerminal, Read},
+    process::exit,
+};
 use std::{net::IpAddr, path::PathBuf};
 use tokio::{
     self, signal,
@@ -17,11 +22,14 @@ use tokio::{
 use tower_http::services::ServeFile;
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-#[command(about = "Share secrets via a local http server", long_about = None)]
+#[command(version, about = "Share secrets via a local http server", long_about = None)]
 struct Args {
-    #[arg(short, long, help = "The secret file to share")]
-    secret_file: PathBuf,
+    #[arg(
+        short,
+        long,
+        help = "The secret file to share. If not set, expects the input to be piped to stdin"
+    )]
+    secret_file: Option<PathBuf>,
 
     #[arg(
         long,
@@ -69,13 +77,12 @@ struct FailState {
 async fn main() {
     let args = Args::parse();
 
-    let absolute_path = validate_and_get_absolute_path(&args.secret_file);
+    let mut stdin = io::stdin();
+    let input_from_stdin = !stdin.is_terminal();
+
     let file_url_path = generate_file_url_path(&args.secret_file, args.url_prefix_length);
 
-    let local_address = get_local_ip(args.bind_ip);
-
     let (shutdown_sender, shutdown_receiver) = mpsc::channel(16);
-
     let access_state = AccessState {
         uses: Arc::new(Mutex::new(0)),
         maximum_uses: args.uses,
@@ -87,14 +94,27 @@ async fn main() {
         shutdown_channel: shutdown_sender,
     };
 
-    let router = {
-        let file_url = file_url_path.clone();
-        Router::new()
-            .route_service(&file_url, ServeFile::new(absolute_path))
-            .layer(middleware::from_fn_with_state(access_state, limit_uses))
-            .fallback(handler_404)
-            .with_state(fail_state)
-    };
+    let router = match args.secret_file {
+        Some(file_path) => {
+            let absolute_path = validate_and_get_absolute_path(&file_path);
+            Router::new().route_service(&file_url_path, ServeFile::new(absolute_path))
+        }
+        None => {
+            if !input_from_stdin {
+                Args::command().print_help().unwrap();
+                eprintln!("Please provide a secret file to share or pipe the secret to stdin");
+                exit(1);
+            }
+            let mut buffer = String::new();
+            stdin.read_to_string(&mut buffer).unwrap();
+            Router::new().route(&file_url_path, get(|| async { buffer }))
+        }
+    }
+    .layer(middleware::from_fn_with_state(access_state, limit_uses))
+    .fallback(handler_404)
+    .with_state(fail_state);
+
+    let local_address = get_local_ip(args.bind_ip);
     let listener = create_listener(local_address).await;
 
     println!(
@@ -181,26 +201,32 @@ fn validate_and_get_absolute_path(file_path: &PathBuf) -> PathBuf {
     }
 }
 
-fn generate_file_url_path(file_path: &PathBuf, url_prefix_length: u16) -> String {
-    let file_name = match file_path.file_name() {
-        Some(file_name) => match file_name.to_str() {
-            Some(file_name) => file_name,
-            None => {
-                eprintln!("Can't decode file name: {:#?}", file_path);
-                std::process::exit(1);
-            }
-        },
-        None => {
-            eprintln!("Can't determine file name from: {:#?}", file_path);
-            std::process::exit(1);
-        }
-    };
+fn generate_file_url_path(file_path: &Option<PathBuf>, url_prefix_length: u16) -> String {
     let random_prefix: String = rand::rng()
         .sample_iter(Alphanumeric)
         .take(usize::from(url_prefix_length))
         .map(char::from)
         .collect();
-    format!("/{}/{}", random_prefix, file_name)
+    match file_path {
+        Some(file_path) => {
+            let file_name = match file_path.file_name() {
+                Some(file_name) => match file_name.to_str() {
+                    Some(file_name) => file_name,
+                    None => {
+                        eprintln!("Can't decode file name: {:#?}", file_path);
+                        std::process::exit(1);
+                    }
+                },
+                None => {
+                    eprintln!("Can't determine file name from: {:#?}", file_path);
+                    std::process::exit(1);
+                }
+            };
+
+            format!("/{}/{}", random_prefix, file_name)
+        }
+        None => format!("/{}", random_prefix),
+    }
 }
 
 async fn shutdown_signal(mut shutdown_receiver: mpsc::Receiver<()>) {
