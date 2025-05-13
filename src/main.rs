@@ -7,6 +7,7 @@ use axum::{
     routing::get,
 };
 use clap::{CommandFactory, Parser};
+use http::{HeaderValue, header};
 use local_ip_address::local_ip;
 use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 use tower_http::services::ServeFile;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Share secrets via a local http server", long_about = None)]
@@ -57,6 +59,13 @@ struct Args {
         help = "IP address to bind the server to. If not set, will try to find the local IP address"
     )]
     bind_ip: Option<IpAddr>,
+
+    #[arg(
+        long,
+        default_value = "utf-8",
+        help = "Default charset to use for text files."
+    )]
+    default_charset: String,
 }
 
 #[derive(Clone)]
@@ -111,6 +120,12 @@ async fn main() {
         }
     }
     .layer(middleware::from_fn_with_state(access_state, limit_uses))
+    .layer(SetResponseHeaderLayer::overriding(
+        header::CONTENT_TYPE,
+        move |response: &Response| -> Option<HeaderValue> {
+            add_charset_to_content_type(response, &args.default_charset)
+        },
+    ))
     .fallback(handler_404)
     .with_state(fail_state);
 
@@ -126,6 +141,31 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal(shutdown_receiver))
         .await
         .unwrap();
+}
+
+fn add_charset_to_content_type(response: &Response, default_charset: &str) -> Option<HeaderValue> {
+    let content_type = response.headers().get(header::CONTENT_TYPE);
+    match content_type {
+        Some(content_type_opt) => match content_type_opt.to_str() {
+            Ok(content_type_str) => {
+                if content_type_str.starts_with("text/") && !content_type_str.contains("charset") {
+                    let new_content_type =
+                        content_type_str.to_string() + "; charset=" + default_charset;
+                    match HeaderValue::from_str(&new_content_type) {
+                        Ok(new_content_type) => Some(new_content_type),
+                        Err(_) => {
+                            eprintln!("Failed to build new content type: {}", new_content_type);
+                            content_type.cloned()
+                        }
+                    }
+                } else {
+                    content_type.cloned()
+                }
+            }
+            Err(_) => None,
+        },
+        None => None,
+    }
 }
 
 async fn limit_uses(State(state): State<AccessState>, request: Request, next: Next) -> Response {
